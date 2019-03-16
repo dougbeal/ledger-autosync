@@ -566,6 +566,7 @@ class PaypalConverter(CsvConverter):
         'Item Title',
         'Name',
         'Net',
+        'Fee',
         'Status',
         'To Email Address',
         'Transaction ID',
@@ -582,12 +583,15 @@ class PaypalConverter(CsvConverter):
 
     def convert(self, row):
         if (((row['Status'] != "Completed") and (row['Status'] != "Refunded") and (
-                row['Status'] != "Reversed")) or (row['Type'] == "Shopping Cart Item")):
+                row['Status'] != "Reversed")) or (row['Type'] == "Shopping Cart Item") or (row['Type'] == "General Withdrawal")):
             return ""
         else:
             currency = row['Currency']
+            if currency == 'USD':
+                currency = '$'
             posting_metadata = {"csvid": self.get_csv_id(row)}
             net = Decimal(row['Net'].replace(',', ''))
+            fee = Decimal(row['Fee'].replace(',', ''))
             gross = Decimal(row['Gross'].replace(',', ''))
 
             if row['Type'] == "Add Funds from a Bank Account" or \
@@ -598,15 +602,23 @@ class PaypalConverter(CsvConverter):
                 postings = [posting,
                             posting.clone_inverted("Transfer:Paypal")]
             else:
-                posting = Posting(self.name,
-                                  Amount(gross, currency),
-                                  metadata=posting_metadata)
-                postings = [
-                    posting,
-                    # TODO Our payees are breaking the payee search in
-                    # mk_dynamic_account
-                    # self.mk_dynamic_account(payee, exclude=self.name),
-                    posting.clone_inverted("Expenses:Misc")]
+                postings = []
+                posting = Posting("Assets:Paypal",
+                                  Amount(gross+fee, currency),
+                                  )
+                postings.append(posting)
+                if not fee.is_zero():
+                    fee_posting = Posting("Expenses:Fees:Paypal",
+                                          Amount(-fee, currency),
+                                          )
+                    postings.append(fee_posting)
+                # TODO Our payees are breaking the payee search in
+                # mk_dynamic_account
+                # self.mk_dynamic_account(payee, exclude=self.name),
+                postings.append(Posting("Income:Paypal",
+                                        Amount(-gross, currency),
+                                        metadata=posting_metadata))
+
             return Transaction(
                 date=datetime.datetime.strptime(row['Date'], "%m/%d/%Y"),
                 payee=self.format_payee(row),
@@ -785,3 +797,152 @@ class SimpleConverter(CsvConverter):
                        Posting(account, Amount(amount, '$', reverse = not(reverse)))
                        ]
         )
+
+# Date,Time,Time Zone,Gross Sales,Discounts,Net Sales,Gift Card Sales,Tax,Tip,Partial Refunds,Total Collected,Source,Card,Card Entry Methods,Cash,Square Gift Card,Other Tender,Other Tender Type,Other Tender Note,Fees,Net Total,Transaction ID,Payment ID,Card Brand,PAN Suffix,Device Name,Staff Name,Staff ID,Details,Description,Event Type,Location,Dining Option,Customer ID,Customer Name,Customer Reference ID,Device Nickname,Deposit ID,Deposit Date,Deposit Details,Fee Percentage Rate,Fee Fixed Rate,Refund Reason
+class SquareConverter(CsvConverter):
+    FIELDSET = {
+        'Date',
+        'Description',
+        'Customer Name',
+        'Customer ID',
+        'Tax',
+        'Net Total',
+        'Cash',
+        'Card',
+        'Total Collected',
+        'Transaction ID',
+        'Event Type'}
+
+    def __init__(self, *args, **kwargs):
+        super(SquareConverter, self).__init__(*args, **kwargs)
+        if self.payee_format is None:
+            self.payee_format = \
+                "{Customer Name} {Customer ID} {Description} ID: {Transaction ID}, {Event Type}"
+
+    def get_csv_id(self, row):
+        return "square.%s" % (Converter.clean_id(row['Transaction ID']))
+
+    def convert(self, row):
+        currency = '$'
+        posting_metadata = {"csvid": self.get_csv_id(row)}
+        tax = Decimal(row['Tax'].lstrip(',$'))
+        net = Decimal(row['Net Total'].lstrip(',$'))
+        fee = Decimal(row['Fees'].lstrip(',$'))
+        gross = Decimal(row['Total Collected'].lstrip(',$'))
+        cash = Decimal(row['Cash'].lstrip(',$'))
+        card = Decimal(row['Card'].lstrip(',$'))
+        postings = []
+
+        cash_from = "Income:Square:Cash"
+        cash_to = "Assets:Cash"
+
+        card_from = "Income:Square:Card"
+        card_to = "Assets:Square"
+
+        fees_to = "Expenses:Fees:Square"
+        taxes_to = "(Liabilites:Tax Collected)" # virtual
+
+        # card transaction
+        if not tax.is_zero():
+            postings.append(Posting(taxes_to,
+                                  Amount(tax, currency)))
+
+
+        if not cash.is_zero():
+            posting = Posting(cash_from,
+                              Amount(-cash, currency))
+            postings.append(posting)
+            postings.append(posting.clone_inverted(cash_to))
+
+
+        if not card.is_zero():
+            postings.append(Posting(card_to,
+                              Amount(-card, currency)))
+            postings.append(Posting(fees_to,
+                                  Amount(-fee, currency)))
+            postings.append(Posting(card_from,
+                              Amount(card+fee, currency)))
+
+
+        return Transaction(
+            date=datetime.datetime.strptime(row['Date'], "%m/%d/%y"),
+            payee=self.format_payee(row),
+            postings=postings,
+            metadata=posting_metadata)
+
+
+
+# stripe all columns
+# id,Type,Source,Amount,Fee,Destination Platform Fee,Net,Currency,Created (UTC),Available On (UTC),Description,Customer Facing Amount,Customer Facing Currency,Transfer,Transfer Date (UTC),Transfer Group,tito_event_title (metadata),tito_registration_email (metadata),tito_registration_id (metadata),tito_registration_name (metadata),tito_registration_reference (metadata),tito_registration_slug (metadata),tito_registration_tax (metadata),tito_registration_url (metadata),tito_release_efxscf-j9q4_quantity (metadata),tito_release_efxscf-j9q4_title (metadata),tito_release_6oxvmtv-lk_quantity (metadata),tito_release_6oxvmtv-lk_title (metadata),tito_release_tnh6qj2dd8u_quantity (metadata),tito_release_tnh6qj2dd8u_title (metadata),tito_release_zwd8loheikw_quantity (metadata),tito_release_zwd8loheikw_title (metadata),tito_release_s4y4osllgla_quantity (metadata),tito_release_s4y4osllgla_title (metadata),tito_registration_release_quantities (metadata),tito_registration_release_slugs (metadata),tito_registration_release_titles (metadata),tito_registration_company (metadata),tito_event_end_date (metadata),tito_event_start_date (metadata)
+class StripeConverter(CsvConverter):
+    FIELDSET = {
+        'Created (UTC)',
+        'Description',
+        'Amount',
+        'Fee',
+        'Net',
+        'Currency',
+        'id',
+        'Type'}
+
+    def __init__(self, *args, **kwargs):
+        super(StripeConverter, self).__init__(*args, **kwargs)
+        if self.payee_format is None:
+            self.payee_format = \
+                "{Description} ID: {id}, {Type}"
+
+    def get_csv_id(self, row):
+        return "stripe.%s" % (Converter.clean_id(row['id']))
+
+    def convert(self, row):
+        if (True):
+        # if (((row['Status'] != "Completed") and (row['Status'] != "Refunded") and (
+        #         row['Status'] != "Reversed")) or (row['Type'] == "Shopping Cart Item")):
+        #     return ""
+        # else:
+            currency = row['Currency']
+            if currency.casefold() == 'usd':
+                currency = '$'
+            posting_metadata = {"csvid": self.get_csv_id(row)}
+            #tax = Decimal(row['Tax'].lstrip(',$'))
+            net = Decimal(row['Net'].lstrip(',$'))
+            fee = Decimal(row['Fee'].lstrip(',$'))
+            gross = Decimal(row['Amount'].lstrip(',$'))
+            date = row['Created (UTC)']
+            source_account = "Income:Stripe"
+            fee_account = "Expenses:Fees:Stripe"
+            asset_account = "Assets:Stripe"
+
+
+            # tax collected, fees, net total
+            postings = []
+
+            if row['Type'] == "payout":
+                posting_metadata['UUID'] = self.get_csv_id(row)
+                postings.append(Posting(asset_account,
+                                        Amount(net, currency)))
+
+                postings.append(Posting(self.name,
+                                        Amount(-net, currency)))
+
+            else:
+                postings.append(Posting(source_account,
+                                        Amount(-gross, currency)))
+                if not fee.is_zero():
+                    postings.append(Posting(fee_account,
+                                            Amount(fee, currency)))
+
+                # TODO Our payees are breaking the payee search  in
+                # mk_dynamic_account
+                # self.mk_dynamic_account(payee, exclude=self.name),
+                # if not tax.is_zero():
+                #     postings.append(Posting("(Liabilites:Tax Collected)",
+                #                             Amount(tax, currency)))
+                postings.append(Posting(asset_account,
+                                        Amount(gross-fee, currency)))
+
+            return Transaction(
+                date=datetime.datetime.strptime(date, "%Y-%m-%d %H:%M"),
+                payee=self.format_payee(row),
+                postings=postings,
+                metadata=posting_metadata)
