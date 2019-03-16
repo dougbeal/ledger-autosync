@@ -122,15 +122,15 @@ class Transaction(object):
         self.metadata = metadata
         self.cleared = cleared
 
-    def format(self, indent=4, assertions=True):
+    def format(self, indent=4, assertions=True, date_format="%Y/%m/%d"):
         retval = ""
         cleared_str = " "
         if self.cleared:
             cleared_str = " * "
         aux_date_str = ""
         if self.aux_date is not None:
-            aux_date_str = "=%s" % (self.aux_date.strftime("%Y/%m/%d"))
-        retval += "%s%s%s%s\n" % (self.date.strftime("%Y/%m/%d"),
+            aux_date_str = "=%s" % (self.aux_date.strftime(date_format))
+        retval += "%s%s%s%s\n" % (self.date.strftime(date_format),
                                   aux_date_str, cleared_str, self.payee)
         for k in sorted(self.metadata.keys()):
             retval += "%s; %s: %s\n" % (" " * indent, k, self.metadata[k])

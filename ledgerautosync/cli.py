@@ -71,7 +71,7 @@ def print_results(converter, ofx, ledger, txns, args):
                 not(ledger.check_transaction_by_id("ofxid", ALL_AUTOSYNC_INITIAL))):
             print(converter.format_initial_balance(ofx.account.statement))
     for txn in txns:
-        print(converter.convert(txn).format(args.indent))
+        print(converter.convert(txn).format(args.indent, date_format=args.date_format))
     if args.assertions:
         print(converter.format_balance(ofx.account.statement))
 
@@ -149,7 +149,7 @@ def import_csv(ledger, args):
     if args.reverse:
         txns = reversed(txns)
     for txn in txns:
-        print(txn.format(args.indent, args.assertions))
+        print(txn.format(args.indent, args.assertions, args.date_format))
 
 
 def load_plugins(config_dir):
@@ -233,6 +233,13 @@ found by payee')
         {tferaction} for OFX. If the input file is a CSV file,
         substitutions are written using the CSV file column names
         between {}.""")
+    parser.add_argument(
+        '--date-format',
+        type=str,
+        default="%Y/%m/%d",
+        dest='date_format',
+        help="""Format string to use for generating date strings.
+        Default is '%%Y/%%m/%%d'. See strftime for format specification.""")
     parser.add_argument('--python', action='store_true', default=False,
                         help='use the ledger python interface')
     parser.add_argument('--slow', action='store_true', default=False,
