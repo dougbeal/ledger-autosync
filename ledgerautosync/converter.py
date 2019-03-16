@@ -518,7 +518,10 @@ class CsvConverter(Converter):
             if klass.FIELDSET <= fieldset:
                 return klass(dialect, name=name, **kwargs)
         # Found no class, bail
-        raise Exception('Cannot determine CSV type')
+        msg = f"Cannot determine CSV type for {str(fieldset)}"
+        for klass in CsvConverter.descendants():
+            msg += f"\n has {klass.FIELDSET.intersection(fieldset)} missing {klass.FIELDSET.difference(fieldset)}"
+        raise Exception(msg)
 
     @classmethod
     def descendants(cls):
