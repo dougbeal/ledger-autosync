@@ -308,10 +308,14 @@ class OfxConverter(Converter):
         txntype = ""
         if (hasattr(txn, 'type') and txn.type is not None):
             txntype = txn.type
+        checknum = ""
+        if (hasattr(txn, 'checknum') and txn.checknum is not None):
+            checknum = txn.checknum
         tferaction = ""
         if (hasattr(txn, 'tferaction') and txn.tferaction is not None):
             tferaction = txn.tferaction.lower()
 
+        
         payee_format = self.payee_format
 
         if payee_format is None:
@@ -331,6 +335,10 @@ class OfxConverter(Converter):
             if payee.startswith(memo):
                 memo = ""
 
+            if checknum != "":
+                payee_format = "({checknum}) {payee_format}".format(
+                    checknum=checknum,
+                    payee_format=payee_format)
         return payee_format.format(
             payee=payee,
             memo=memo,
